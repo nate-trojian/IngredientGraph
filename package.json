@@ -1,0 +1,24 @@
+{
+  "name": "ingredient-graph",
+  "version": "1.0.0",
+  "private": true,
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nate-trojian/IngredientGraph.git"
+  },
+  "author": "@nate-trojian",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/nate-trojian/IngredientGraph/issues"
+  },
+  "homepage": "https://github.com/nate-trojian/IngredientGraph#readme",
+  "dependencies": {
+    "express": "^4.15.3",
+    "neo4j": "^2.0.0-RC2"
+  }
+}
