@@ -94,9 +94,10 @@ public class Neo4jLoader {
     private String removeFirst2(String name) {
         String[] parts = name.split(" ");
         StringBuilder sb = new StringBuilder();
-        for(int i=2; i < parts.length; i++) {
-            sb.append(parts[i]);
+        for(int i=2; i < parts.length-1; i++) {
+            sb.append(parts[i]).append(" ");
         }
+        sb.append(parts[parts.length-1]);
         return sb.toString();
     }
 }
