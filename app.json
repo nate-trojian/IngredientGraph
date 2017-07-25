@@ -1,0 +1,18 @@
+{
+  "name": "Ingredient Graph Template",
+  "addons": [
+    {
+      "plan": "graphenedb:chalk",
+      "as": "Neo4j"
+    }
+  ],
+  "formation": {
+    "web": {
+    "quantity": 1,
+    "size": "free"
+    }
+  },
+  "scripts": {
+    "postdeploy": "java $JAVA_OPTS -cp target/classes:target/dependency/* IngredientGraph"
+  }
+}
