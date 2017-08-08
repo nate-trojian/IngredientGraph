@@ -13,6 +13,8 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Author: Nate
@@ -20,6 +22,40 @@ import java.util.HashMap;
  * Description: Loader for Neo4j - Uses BatchInserter so really is just local only
  */
 public class Neo4jLoader {
+    //TODO Look backs are probably needed
+    //TODO Need to redo how inch-[thick|wide|long] is handled
+    private final Pattern ingredPattern = Pattern.compile(
+            "((?<quant>\\d(?:(?=/)/\\d|(?:(?=\\s\\d)\\s\\d/\\d|\\d*)))\\s)?" +
+            "(?<measurement>(head|gallon|quart|pint|cup|ounce|tablespoon|teaspoon|" +
+            "small|medium|large|pound|lb|stalk|clove|bunch|sprig|sheet|whole|pinch|dash|" +
+            "inch[\\s-]thick|inch[\\s-]wide|inch[\\s-]long)(?>es|s)?)?(?> of|-sized)?[\\s-]?" +
+            "(?<name>.+)"
+    );
+    private final Pattern amountPattern = Pattern.compile(
+            "(?<quant>\\d(?:(?=/)/\\d|(?:(?=\\s\\d)\\s\\d/\\d|\\d*)))" +
+            "(?<measurement>(head|gallon|quart|pint|cup|ounce|tablespoon|teaspoon|\" +\n" +
+            "small|medium|large|pound|lb|stalk|clove|bunch|sprig|sheet|whole|pinch|dash|\" +\n" +
+            "inch-thick|inch-wide|inch-long)(?>es|s)?)?(?> of|-sized)"
+    );
+
+    /* Cypher to create related edges
+    MATCH (i1:Ingredient)--(r:`22-Minute Meals`)--(i2:Ingredient) WHERE NOT i1=i2 WITH i1, i2, count(DISTINCT r) as comRec
+    MATCH (r:`22-Minute Meals`) WITH i1, i2, comRec, count(r) as numRec
+    MATCH (i1)--(r:`22-Minute Meals`) WITH i1, i2, comRec, numRec, count(r) as i1Rec
+    WITH i1, i2, comRec/toFloat(i1Rec) as weight
+    WHERE weight > 0.7
+    CREATE (i1)-[:relatesTo {weight: weight}]->(i2)
+     */
+
+    /* Cypher get density of graph
+    MATCH (i1:Ingredient)-[r1:relatesTo]-(i2:Ingredient)-[r2:relatesTo]-(i1) WITH i1, sum((r1.weight+r2.weight)/2) as weightedCon, count(i2) as unweightedCon
+    MATCH (i1:Ingredient)-[r:relatesTo]-(:Ingredient) WITH i1, weightedCon, unweightedCon, toFloat(count(r)) as numR
+    WITH i1, weightedCon/numR as weightedDensity, unweightedCon/numR as unweightedDensity
+    WITH i1, weightedDensity, unweightedDensity, (unweightedDensity - weightedDensity) as weightShift
+    order by weightShift DESC, unweightedDensity DESC
+    return i1, weightShift, unweightedDensity, weightedDensity
+     */
+
     public static void main(String[] args) {
         Neo4jLoader loader = new Neo4jLoader(args[0]);
 
@@ -81,23 +117,42 @@ public class Neo4jLoader {
         }
         labels[categories.size()] = Label.label("Recipe");
 
-        long ret = bi.createNode(props, labels);
+        Long ret = bi.createNode(props, labels), ingredId;
+        String shortName, actualIngred;
+        Matcher m;
+        StringBuilder sb;
         for(String ingred: recipe.getIngredients()) {
-            String actualIngred = removeFirst2(ingred);
-            long ingredId = ingredients.getOrDefault(actualIngred, addNewIngredient(actualIngred));
+            shortName = "";
+            m = ingredPattern.matcher(ingred.toLowerCase());
+            if(m.find()) shortName = m.group("name");
+
+            sb = new StringBuilder();
+            boolean inPar = false;
+            for(char c: shortName.toCharArray()) {
+                // I think continue is technically faster than fall-through
+                if(inPar) {
+                    if(c == ')') inPar = false;
+                }
+                else if(c == '(') inPar = true;
+                else if(c == ',' || c == ';') break;
+                else sb.append(c);
+            }
+            actualIngred = sb.toString();
+
+            if(actualIngred.startsWith("plus ")) {
+                m = amountPattern.matcher(actualIngred);
+                if(m.find()) {
+                    //TODO Save regex groups to a new edge
+                    actualIngred = actualIngred.substring(m.end()+1);
+                }
+            }
+
+            if(actualIngred.isEmpty()) continue;
+            ingredId = ingredients.get(actualIngred);
+            if(ingredId == null) ingredId = addNewIngredient(actualIngred);
             bi.createRelationship(ret, ingredId,
                     RelationshipType.withName("inRecipe"), new HashMap<>());
         }
         return ret;
-    }
-
-    private String removeFirst2(String name) {
-        String[] parts = name.split(" ");
-        StringBuilder sb = new StringBuilder();
-        for(int i=2; i < parts.length-1; i++) {
-            sb.append(parts[i]).append(" ");
-        }
-        sb.append(parts[parts.length-1]);
-        return sb.toString();
     }
 }

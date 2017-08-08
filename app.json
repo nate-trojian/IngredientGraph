@@ -14,5 +14,13 @@
   },
   "scripts": {
     "postdeploy": "java $JAVA_OPTS -cp target/classes:target/dependency/* IngredientGraph"
-  }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/java"
+    },
+    {
+      "url": "heroku/nodejs"
+    }
+  ]
 }

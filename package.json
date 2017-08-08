@@ -18,6 +18,7 @@
   },
   "homepage": "https://github.com/nate-trojian/IngredientGraph#readme",
   "dependencies": {
+    "d3": "^4.10.0",
     "express": "^4.15.3",
     "neo4j": "^2.0.0-RC2"
   }
