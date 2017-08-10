@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "postdeploy": "java $JAVA_OPTS -cp target/classes:target/dependency/* IngredientGraph"
+    "postdeploy": "java $JAVA_OPTS -cp IngredientGraph.jar com.ntrojian.ingredientgraph.Neo4jLoader"
   },
   "buildpacks": [
     {
