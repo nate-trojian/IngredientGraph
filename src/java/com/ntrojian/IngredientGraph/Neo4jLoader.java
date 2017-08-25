@@ -1,4 +1,4 @@
-package com.ntrojian.IngredientGraph;
+package com.ntrojian.ingredientgraph;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
@@ -24,37 +24,30 @@ import java.util.regex.Pattern;
 public class Neo4jLoader {
     //TODO Look backs are probably needed
     //TODO Need to redo how inch-[thick|wide|long] is handled
+
+    private final String[] continueSet = new String[] {
+        ".*:.*", "ingredient info", "special", "\\*", "garnish", "note", "n/a"
+    };
+    private final String[] rematchSet = new String[] {"plus", "to", "or"};
+
+    private final String[] measurementSet = new String[] {
+        "head", "gallon", "quart", "pint", "cup", "ounce", "tablespoon", "teaspoon", "small", "medium", "large", "pound", "lb", "stalk",
+        "clove", "bunch", "sprig", "sheet", "whole", "pinch", "dash", "package", "can", "jar", "carton", "chunk", "block",
+        "inch[\\s-]thick", "inch[\\s-]wide", "inch[\\s-]long", "inch[\\s-]cubed?", "inch[\\s-]diced?", "inch[\\s-]piece"
+    };
+
     private final Pattern ingredPattern = Pattern.compile(
-            "((?<quant>\\d(?:(?=/)/\\d|(?:(?=\\s\\d)\\s\\d/\\d|\\d*)))\\s)?" +
-            "(?<measurement>(head|gallon|quart|pint|cup|ounce|tablespoon|teaspoon|" +
-            "small|medium|large|pound|lb|stalk|clove|bunch|sprig|sheet|whole|pinch|dash|" +
-            "inch[\\s-]thick|inch[\\s-]wide|inch[\\s-]long)(?>es|s)?)?(?> of|-sized)?[\\s-]?" +
-            "(?<name>.+)"
-    );
-    private final Pattern amountPattern = Pattern.compile(
-            "(?<quant>\\d(?:(?=/)/\\d|(?:(?=\\s\\d)\\s\\d/\\d|\\d*)))" +
-            "(?<measurement>(head|gallon|quart|pint|cup|ounce|tablespoon|teaspoon|\" +\n" +
-            "small|medium|large|pound|lb|stalk|clove|bunch|sprig|sheet|whole|pinch|dash|\" +\n" +
-            "inch-thick|inch-wide|inch-long)(?>es|s)?)?(?> of|-sized)"
+            "((?<quant>\\d(?:(?=/)/\\d|(?:(?=\\s\\d)\\s\\d/\\d|\\d*)))[\\s-])?" +
+            "((?<measurement>" + regexGroup(measurementSet) + "(?>es|s)?)?" +
+            "(?> of|-sized| package | block of |)?[\\s-])?(?<name>.+)"
     );
 
-    /* Cypher to create related edges
-    MATCH (i1:Ingredient)--(r:`22-Minute Meals`)--(i2:Ingredient) WHERE NOT i1=i2 WITH i1, i2, count(DISTINCT r) as comRec
-    MATCH (r:`22-Minute Meals`) WITH i1, i2, comRec, count(r) as numRec
-    MATCH (i1)--(r:`22-Minute Meals`) WITH i1, i2, comRec, numRec, count(r) as i1Rec
-    WITH i1, i2, comRec/toFloat(i1Rec) as weight
-    WHERE weight > 0.7
-    CREATE (i1)-[:relatesTo {weight: weight}]->(i2)
-     */
-
-    /* Cypher get density of graph
-    MATCH (i1:Ingredient)-[r1:relatesTo]-(i2:Ingredient)-[r2:relatesTo]-(i1) WITH i1, sum((r1.weight+r2.weight)/2) as weightedCon, count(i2) as unweightedCon
-    MATCH (i1:Ingredient)-[r:relatesTo]-(:Ingredient) WITH i1, weightedCon, unweightedCon, toFloat(count(r)) as numR
-    WITH i1, weightedCon/numR as weightedDensity, unweightedCon/numR as unweightedDensity
-    WITH i1, weightedDensity, unweightedDensity, (unweightedDensity - weightedDensity) as weightShift
-    order by weightShift DESC, unweightedDensity DESC
-    return i1, weightShift, unweightedDensity, weightedDensity
-     */
+    private final Pattern continueKeywords = Pattern.compile(
+        "^" + regexGroup(continueSet)
+    );
+    private final Pattern rematchKeywords = Pattern.compile(
+        "^" + regexGroup(rematchSet) + " "
+    );
 
     public static void main(String[] args) {
         Neo4jLoader loader = new Neo4jLoader(args[0]);
@@ -108,7 +101,7 @@ public class Neo4jLoader {
 
     public long addNewRecipe(RecipePOJO recipe) {
         HashMap<String, Object> props = new HashMap<>();
-        props.put("name", recipe.title);
+        props.put("name", recipe.title.trim());
 
         ArrayList<String> categories = recipe.getCategories();
         Label[] labels = new Label[categories.size()+1];
@@ -123,7 +116,15 @@ public class Neo4jLoader {
         StringBuilder sb;
         for(String ingred: recipe.getIngredients()) {
             shortName = "";
-            m = ingredPattern.matcher(ingred.toLowerCase());
+            //Need to replace all the numbers in word form to digit form
+            //We have 1-10, 11, 12 (needs dozen), 14, 15, 16, 18, 20, 24, 28, 36, 65
+            //Also have to replace half, third, quarter
+            //Just gonna hard code
+            shortName = ingred.toLowerCase();
+            shortName = shortName.replaceAll("^(about|approximately|a|use) ", "");
+            //shortName.replaceAll("^one| one ")
+
+            m = ingredPattern.matcher(shortName);
             if(m.find()) shortName = m.group("name");
 
             sb = new StringBuilder();
@@ -137,22 +138,39 @@ public class Neo4jLoader {
                 else if(c == ',' || c == ';') break;
                 else sb.append(c);
             }
-            actualIngred = sb.toString();
+            //Cause this is faster than doing the logic in loop
+            actualIngred = sb.toString().trim();
 
-            if(actualIngred.startsWith("plus ")) {
-                m = amountPattern.matcher(actualIngred);
-                if(m.find()) {
-                    //TODO Save regex groups to a new edge
-                    actualIngred = actualIngred.substring(m.end()+1);
-                }
+            //SPECIAL CASES TIME
+            // ^ Not sure why I'm so excited about it
+            m = rematchKeywords.matcher(actualIngred);
+            if(m.find()) {
+                Matcher rematch = ingredPattern.matcher(actualIngred.substring(m.end()+1));
+                if(rematch.find()) actualIngred = rematch.group("name");
             }
 
+            //Yes I meant for this to be here instead of above the preceding if statement
             if(actualIngred.isEmpty()) continue;
+            m = continueKeywords.matcher(actualIngred);
+            if(m.find()) continue;
+            
+            actualIngred = actualIngred.replaceAll("\\*", "").trim();
+
+            //We got something
             ingredId = ingredients.get(actualIngred);
             if(ingredId == null) ingredId = addNewIngredient(actualIngred);
             bi.createRelationship(ret, ingredId,
                     RelationshipType.withName("inRecipe"), new HashMap<>());
         }
         return ret;
+    }
+
+    private String regexGroup(String[] group) {
+        StringBuilder ret = new StringBuilder();
+        ret.append("(").append(group[0]);
+        for(int i=1; i<group.length; i++) {
+            ret.append("|").append(group[i]);
+        }
+        return ret.append(")").toString();
     }
 }
